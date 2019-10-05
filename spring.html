@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+    <meta charset="UTF-8">
+    <title>Spring Calculator</title>
+    <style>
+    header {
+        background-color:burlywood;
+        padding: 10px;
+        
+    }
+    #leftSection{
+        width: 400px;
+        float: left;
+    }
+    #rightSection{
+        width: 500px;
+        float: left;
+    }
+    
+    </style>
+<body>
+    <header>
+ <h2>Spring Calculator</h2>
+ <p>made by saehoon</p>
+
+
+     <span><input type="button" onclick="calculator()" value="Calculate!"></span>
+     <span><input type="button" onclick="location.href='spring.html'" value="Reset"></span>
+    </header>
+
+<section>
+    <div id="leftSection">
+<br>재질 : 
+    <select style ="background-color: yellow" id="material_ID" >
+        <option value="SUS304">SUS304</option>
+        <option value="SWP-B">SWP-B</option>
+    </select></br>
+  <br>선경(mm) : <input type="text" id="materialDia" style ="background-color: yellow" value=0.65></br>
+  <br>외경(mm) : <input type="text" id="outDia" style ="background-color: yellow" value=6.1></br>
+  <br>중심경(mm) : <input type="text" id ="centerDia"></br>
+  <br>내경(mm) : <input type="text" id="inDia"></br>
+  <br>총권수(Nt) : <input type="text" id="Nt" style ="background-color: yellow" value=12></br>
+  <br>유효권수(Na): <input type="text" id="Na"></br>
+  <br>권방향 : 
+  <select style ="background-color: yellow" id="direction" value="Right" >
+    <option value="Right">Right</option>
+    <option value="Left">Left</option>
+  </select></br>
+  <br>자유장(mm) : <input type="text" id="height" style ="background-color: yellow" value= 16.4></br>
+  <br>피치(p) : <input type="text" id="pitch"></br>
+</div>
+<div id="rightSection">
+  <br>S/P 정수(gf/㎜) : <input type="text" id="springValue"></br>
+  <br>1차길이(㎜) : <input type="text"  id= "firstLength" style ="background-color: yellow" value=11.4></br>
+  <br>1차하중(gf) : <input type="text" id="firstForce"></br>
+  <br>2차길이(㎜): <input type="text" id="secondLength" style ="background-color: yellow" value=9.2></br>
+  <br>2차하중(gf) : <input type="text" id="secondForce"></br>
+  <br>S/P 지수(D/d): <input type="text" id="springNum"></br>
+  <br>응력수정계수 (Wahl 정정 계수) : <input type="text" id="whalNum"></br>
+  <br>전단응력(kgf/㎟) : <input type="text" id="stress"></br>
+  <br>밀착길이(㎜) : <input type="text" id="tightLength"></br>
+  <br>인장강도(kgf/㎟) : <input type="text" id="tensionStress" value=250></br>
+  <br>응력비허용범위(0.8 이하) : <input type="text" id="safetyValue"></br>
+</div>
+</section> 
+
+    <script>
+function calculator(){
+    var material_JS = document.getElementById("material_ID").value;
+    var material_JS_Num= 0;
+    if(material_JS === "SWP-B"){
+        material_JS_Num = 7000;}
+    else if(material_JS === "SUS304"){
+         material_JS_Num = 8000;
+            };
+    var materialDia_JS = Number(document.getElementById("materialDia").value);
+    var outDia_JS = Number(document.getElementById("outDia").value);
+    var centerDia_JS = outDia_JS-materialDia_JS;
+    var inDia_JS = outDia_JS-(2*materialDia_JS);
+    var Nt_JS = Number(document.getElementById("Nt").value);
+    var Na_JS = Nt_JS-2;
+    var height_JS = Number(document.getElementById("height").value);
+
+    var tightLength_JS = Nt_JS * materialDia_JS;
+    var pitch_JS = materialDia_JS+(height_JS-tightLength_JS)/10;
+    var springValue_JS = ((material_JS_Num * Math.pow(materialDia_JS,4))/(8 * Na_JS * Math.pow(centerDia_JS,3))) * 1000;
+
+    var firstLength_JS = Number(document.getElementById("firstLength").value);
+    var firstForce_JS = (height_JS - firstLength_JS) * springValue_JS;
+    var secondLength_JS = Number(document.getElementById("secondLength").value);
+    var secondForce_JS = (height_JS - secondLength_JS) * springValue_JS;
+    var springNum_JS = centerDia_JS / materialDia_JS;
+    var whalNum_JS = (4*springNum_JS-1)/(4*springNum_JS-4)+(0.615/springNum_JS);
+    var stress_JS = ((8*centerDia_JS*secondForce_JS*whalNum_JS)/(Math.PI*Math.pow(materialDia_JS,3)))/1000;
+    var tensionStress_JS = Number(document.getElementById("tensionStress").value);
+    var safetyValue_JS = stress_JS/tensionStress_JS;
+
+    document.getElementById("centerDia").value = centerDia_JS.toFixed(2);
+    document.getElementById("inDia").value = inDia_JS.toFixed(2);
+    document.getElementById("Na").value = Na_JS.toFixed(2);
+    document.getElementById("tightLength").value = tightLength_JS.toFixed(2);
+    document.getElementById("pitch").value = pitch_JS.toFixed(2);
+    document.getElementById("springValue").value = springValue_JS.toFixed(2);
+    document.getElementById("firstForce").value = firstForce_JS.toFixed(2);
+    document.getElementById("secondForce").value = secondForce_JS.toFixed(2);
+    document.getElementById("springNum").value = springNum_JS.toFixed(2);
+    document.getElementById("whalNum").value = whalNum_JS.toFixed(2);
+    document.getElementById("stress").value = stress_JS.toFixed(2);
+    document.getElementById("safetyValue").value = safetyValue_JS.toFixed(2);
+
+}
+
+    </script>
+</body>
+</html>

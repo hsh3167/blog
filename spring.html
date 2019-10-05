@@ -15,6 +15,10 @@
     #rightSection{
         width: 500px;
         float: left;
+        padding:10px;
+    }
+    footer{
+        clear:both
     }
     
     </style>
@@ -28,7 +32,7 @@
      <span><input type="button" onclick="location.href='spring.html'" value="Reset"></span>
     </header>
 
-<section>
+<div>
     <div id="leftSection">
 <br>재질 : 
     <select style ="background-color: yellow" id="material_ID" >
@@ -62,11 +66,15 @@
   <br>인장강도(kgf/㎟) : <input type="text" id="tensionStress" value=250></br>
   <br>응력비허용범위(0.8 이하) : <input type="text" id="safetyValue"></br>
 </div>
-</section> 
-<div>
-    아래의 스프링성질표에서 설계하고자 하는 스프링의 선경에 매칭되는 인장강도를 선정
+
+</div> 
+
+<footer>
+</br></br>
+    <br>* 아래의 스프링성질표에서 설계하고자 하는 스프링의 선경에 매칭되는 인장강도를 선정</br></br></br>
     <img src="https://hsh3167.github.io/blog/spring성질.jpg">
-</div>
+</footer>
+
     <script>
 function calculator(){
     var material_JS = document.getElementById("material_ID").value;

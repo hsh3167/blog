@@ -1569,6 +1569,7 @@ function updateHUD(dt) {
     const abs = $('absStatus');
     abs.classList.toggle('active', player.absAssist);
     abs.title = player.absAssist ? '제동력을 조절하고 있습니다' : '제동 보조 사용 가능';
+    $('cornerStatus').hidden = !player.cornerAssist;
   }
   if (player.roulette > 0) {
     rouletteFlip -= dt;
@@ -1970,7 +1971,7 @@ function updateModeUI() {
   $('carSpecs').textContent = sim ? spec.mass.toLocaleString('ko-KR') + ' kg  ·  ' + spec.kw + ' kW  ·  ' + (spec.rearDrive === 1 ? '후륜구동' : '사륜구동')
     : '최고속 ' + Math.round(CC[settings.cc].max * vehicle.spd * 4.2) + ' km/h  ·  ' + CHARS[settings.char].name;
   $('controlsHelp').innerHTML = '<kbd>↑</kbd> 가속 · <kbd>↓</kbd> 제동/후진 · <kbd>←</kbd> <kbd>→</kbd> 조향 · <kbd>Esc</kbd> 일시정지'
-    + (sim ? '<br>게임패드 <kbd>RT</kbd> 가속 · <kbd>LT</kbd> 제동 · 자동 변속 · <kbd>R</kbd> 코스 복귀'
+    + (sim ? '<br>게임패드 <kbd>RT</kbd> 가속 · <kbd>LT</kbd> 제동 · 자동 변속 · <kbd>R</kbd> 코스 복귀<br>코너 진입 시 가속과 제동이 자동으로 보조됩니다'
       : '<br><kbd>Space</kbd> 점프/드리프트 · <kbd>E</kbd> 아이템 · <kbd>↓</kbd> + <kbd>E</kbd> 후방 발사')
     + '<br><kbd>C</kbd> 뒤돌아보기 · <kbd>B</kbd> 음악 · <kbd>M</kbd> 효과음';
   const record = $('menuRecord');

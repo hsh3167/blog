@@ -167,3 +167,4 @@ kbd{font:600 11px var(--mono);background:#273241;border:1px solid #465361;color:
 
 #absStatus{font:800 9px var(--mono);letter-spacing:.04em;border:1px solid #65728755;color:#b1bece;border-radius:3px;padding:2px 3px}
 #absStatus.active{color:#251c07;background:#ffc85f;border-color:#ffc85f}
+#cornerStatus{font:800 9px var(--mono);white-space:nowrap;color:#092324;background:#6fe3df;border-radius:3px;padding:2px 3px}

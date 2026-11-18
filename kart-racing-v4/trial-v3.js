@@ -15,7 +15,7 @@ function setGhostEnabled(enabled) {
 
 function trialKey() {
   const trackId = TRACKS[settings.track].theme;
-  return simulationMode() ? SIMULATION + ':' + trackId : ARCADE + ':' + trackId + ':' + CC[settings.cc].name;
+  return simulationMode() ? SIMULATION + ':' + trackId + ':v41' : ARCADE + ':' + trackId + ':' + CC[settings.cc].name;
 }
 
 function readRecordStore(key) {
@@ -35,7 +35,9 @@ function readTrialRecords(store = readRecordStore(TRIAL_RECORDS)) {
   const machine = course?.machines?.[VEHICLES[settings.veh].id];
   const oldKey = TRACKS[settings.track].theme + ':' + CC[settings.cc].name;
   const previous = arcadeMode() ? readRecordStore(V3_TRIAL_RECORDS)[oldKey]?.machines?.[VEHICLES[settings.veh].id] : null;
-  const legacy = previous || (arcadeMode() ? readRecordStore(LEGACY_TRIAL_RECORDS)[oldKey] : null);
+  const legacy = simulationMode()
+    ? store[SIMULATION + ':' + TRACKS[settings.track].theme]?.machines?.[VEHICLES[settings.veh].id]
+    : previous || readRecordStore(LEGACY_TRIAL_RECORDS)[oldKey];
   const splits = machine?.splits;
   return {
     overall: {

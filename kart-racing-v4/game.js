@@ -367,13 +367,6 @@ function shade(hex, l) { const c = new THREE.Color(hex); c.offsetHSL(0, 0, l / 2
 const TEX = {};
 function makeTextures() {
   const rep = t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; };
-  TEX.asphalt = rep(canvasTex(512, 512, (g, w, h) => {
-    const img = g.createImageData(w, h);
-    for (let i = 0; i < w * h; i++) { const v = 150 + (Math.random() - 0.5) * 60 + (Math.random() < 0.02 ? 40 : 0); img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255; }
-    g.putImageData(img, 0, 0);
-    for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(0,0,0,${rand(0.03, 0.08)})`; g.beginPath(); g.ellipse(rand(0, w), rand(0, h), rand(20, 80), rand(10, 40), rand(0, 3), 0, TAU); g.fill(); }
-    g.fillStyle = 'rgba(0,0,0,0.08)'; g.fillRect(w * 0.3, 0, w * 0.12, h); g.fillRect(w * 0.58, 0, w * 0.12, h);
-  }));
   TEX.detail = rep(canvasTex(256, 256, (g, w, h) => {
     const img = g.createImageData(w, h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; const n = fbm(x / 16, y / 16) * 0.5 + Math.random() * 0.5; const v = 205 + n * 50; img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255; }
@@ -610,35 +603,12 @@ function buildWorld(tr) {
   const terrain = new THREE.Mesh(tg, terrainMaterial);
   terrain.receiveShadow = true; scene.add(terrain);
 
-  // 도로
+  // Track graphics share the existing road width and collision boundary.
   scene.add(ribbon(tr, -tr.wallD - 1.5, tr.wallD + 1.5, -0.04, std(th.verge, { map: cloneTex(TEX.detail), roughness: 0.95 }), 18, 18));
-  scene.add(ribbon(tr, -tr.halfW, tr.halfW, 0.0, std(th.road, { map: cloneTex(TEX.asphalt), roughness: 0.88 }), tr.halfW * 2));
-  const curbTex = canvasTex(32, 64, (g, w, h) => { g.fillStyle = '#' + new THREE.Color(th.curbA).getHexString(); g.fillRect(0, 0, w, h / 2); g.fillStyle = '#' + new THREE.Color(th.curbB).getHexString(); g.fillRect(0, h / 2, w, h / 2); g.fillStyle = 'rgba(0,0,0,0.15)'; g.fillRect(0, 0, 3, h); });
-  curbTex.wrapT = THREE.RepeatWrapping;
-  const curbM = std(0xffffff, { map: curbTex, roughness: 0.6 });
-  scene.add(ribbon(tr, tr.halfW, tr.halfW + 1.8, 0.03, curbM, 7));
-  scene.add(ribbon(tr, -tr.halfW - 1.8, -tr.halfW, 0.03, curbM, 7));
-  const lineM = std(0xffffff, { roughness: 0.5, emissive: th.night ? 0x444466 : 0 });
-  scene.add(ribbon(tr, tr.halfW - 0.9, tr.halfW - 0.5, 0.015, lineM, 10));
-  scene.add(ribbon(tr, -tr.halfW + 0.5, -tr.halfW + 0.9, 0.015, lineM, 10));
-  if (!/monza|spa/.test(def.theme)) scene.add(ribbon(tr, -0.25, 0.25, 0.015, std(0xffffff, { map: TEX.dash, transparent: true, emissive: th.night ? 0x444466 : 0 }), 14));
-
-  // 벽
-  let wmat;
-  if (th.wall === 'ads') wmat = std(0xffffff, { map: cloneTex(TEX.ads), roughness: 0.5 });
-  else wmat = std(0xffffff, { map: cloneTex(th.wall === 'stone' ? TEX.stone : TEX.adobe), roughness: 0.9, emissive: th.night ? 0x1a1030 : 0 });
-  wmat.side = THREE.DoubleSide;
-  const wh = th.wall === 'ads' ? 1.6 : 2.2, wu = th.wall === 'ads' ? 24 : 5;
-  scene.add(wallMesh(tr, tr.wallD, 0, wh, wmat, wu));
-  scene.add(wallMesh(tr, -tr.wallD, 0, wh, wmat, wu));
-  if (th.fence && Q.fence) {
-    const fm = new THREE.MeshStandardMaterial({ map: TEX.fence, transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, roughness: 0.4, metalness: 0.6 });
-    for (const s of [1, -1]) { const f = wallMesh(tr, s * (tr.wallD + 0.3), wh, 3.2, fm, 3.2); f.castShadow = false; scene.add(f); }
-  }
-  if (th.night) {
-    scene.add(wallMesh(tr, tr.wallD - 0.05, wh, 0.25, new THREE.MeshBasicMaterial({ color: 0x4fc3f7, side: THREE.DoubleSide }), 5));
-    scene.add(wallMesh(tr, -tr.wallD + 0.05, wh, 0.25, new THREE.MeshBasicMaterial({ color: 0xff66ff, side: THREE.DoubleSide }), 5));
-  }
+  const corners = buildCircuitSurfaces(tr, th);
+  addCircuitScenery(tr);
+  addGridPaint(tr);
+  if (simulationMode()) addBrakingBoards(tr, corners);
 
   // 출발선, 게이트, 관중석, 피트
   const sl = new THREE.Mesh(new THREE.PlaneGeometry(tr.halfW * 2, 3), std(0xffffff, { map: TEX.checker }));
@@ -790,9 +760,9 @@ function addPits(tr) {
   const roof = new THREE.Mesh(new THREE.BoxGeometry(12, 0.55, 60), std(0x263238));
   roof.position.y = 4.65;
   g.add(roof);
+  addGarageFacade(g, location, theme.night);
   placeOnTrack(g, tr, location.idx, location.lat, -0.3);
   scene.add(g);
-  scene.userData.optionalScenery.push(g);
 }
 function scatter(tr, count, minD, fn, maxR = 700) {
   const b = tr.bounds; let placed = 0, tries = 0;
@@ -1433,9 +1403,8 @@ function buildRace() {
   order.forEach((ch, i) => {
     const isP = ch === pc;
     const k = new Kart(ch, isP ? pv : vehPool[vi++ % vehPool.length], isP);
-    const row = Math.floor(i / 2), col = i % 2;
-    const idx = ((track.N - Math.round(12 / track.sp) - row * Math.round(14 / track.sp)) % track.N + track.N) % track.N;
-    const lat = trial ? 0 : (col ? 1 : -1) * track.halfW * 0.42 + (row % 2 ? 1.5 : -1.5);
+    const slot = gridSlot(track, i);
+    const idx = slot.idx, lat = trial ? 0 : slot.lat;
     k.pos.set(track.P[idx].x + track.R[idx].x * lat, 0, track.P[idx].z + track.R[idx].z * lat);
     k.heading = track.H[idx]; k.idx = idx; k.lat = lat; k.gy = track.Y[idx];
     k.courseProgress = idx - track.N;
@@ -1597,6 +1566,9 @@ function updateHUD(dt) {
     setT('rpm', Math.round(player.rpm / 50) * 50 + ' RPM');
     $('rpmFill').style.width = clamp(player.rpm / 8500 * 100, 0, 100).toFixed(1) + '%';
     $('rpmFill').classList.toggle('redline', player.rpm > 7350);
+    const abs = $('absStatus');
+    abs.classList.toggle('active', player.absAssist);
+    abs.title = player.absAssist ? '제동력을 조절하고 있습니다' : '제동 보조 사용 가능';
   }
   if (player.roulette > 0) {
     rouletteFlip -= dt;
@@ -1854,7 +1826,7 @@ function renderScene(dt, t) {
 let menuScene = null, menuCar = null, menuCam = null, menuEnv = null, menuKey = '';
 let previousMenuFrame = -Infinity;
 let setupPage = 'track';
-const selectedClass = { arcade: 0, simulation: 1 };
+const selectedClass = { arcade: 0, simulation: 0 };
 const setupPanels = { track: 'setupTrack', vehicle: 'setupVehicle', driver: 'setupDriver' };
 const drivingLabel = () => simulationMode() ? '고급 레이싱' : '초급 아케이드';
 const classOptions = () => simulationMode() ? SIM_AI_CLASSES : CC;
@@ -1985,7 +1957,7 @@ function updateModeUI() {
     });
   }
   $('modeDescription').textContent = sim
-    ? '가속과 제동으로 접지력을 관리하는 순수 레이싱'
+    ? '제동 보조 · 차량별 접지력과 제동 거리 · 아이템 없는 레이싱'
     : '쉬운 조향 · 드리프트 부스트 · 아이템 배틀';
   $('ccTitle').textContent = sim ? 'AI 난이도' : '엔진 클래스';
   $('ccSetup').classList.toggle('hidden',trial && sim);
@@ -2012,7 +1984,7 @@ function updateModeUI() {
       '종합 · 완주 ' + leader(overall.total,overall.totalMachine) + ' · 최고 랩 ' + leader(overall.lap,overall.lapMachine),
       vehicle.name + ' · 완주 ' + time(machine.total) + ' · 최고 랩 ' + time(machine.lap),
     ];
-    if (legacy.lap !== null || legacy.total !== null) lines.push('이전 V3 · 완주 ' + time(legacy.total) + ' · 최고 랩 ' + time(legacy.lap));
+    if (legacy.lap !== null || legacy.total !== null) lines.push((sim ? '이전 V4' : '이전 V3') + ' · 완주 ' + time(legacy.total) + ' · 최고 랩 ' + time(legacy.lap));
     record.textContent = lines.join('\n');
   }
   updateOptBtns();

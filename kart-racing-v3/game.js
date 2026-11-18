@@ -707,11 +707,14 @@ function addGantry(tr, idx, tex, main) {
   const beam = new THREE.Mesh(new THREE.BoxGeometry(edge * 2 + 0.6, 0.38, 0.38), postMaterial);
   beam.position.y = height;
   g.add(beam);
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(main ? 8.6 : 10, 1.35), new THREE.MeshBasicMaterial({
-    map: tex, side: THREE.DoubleSide,
-  }));
-  sign.position.set(-tr.halfW * 0.85, height + 0.75, 0);
-  g.add(sign);
+  const signGeometry = new THREE.PlaneGeometry(main ? 8.6 : 10, 1.35);
+  const signMaterial = new THREE.MeshBasicMaterial({ map: tex });
+  for (const side of [-1, 1]) {
+    const sign = new THREE.Mesh(signGeometry, signMaterial);
+    sign.position.set(-tr.halfW * 0.85, height + 0.75, side * 0.02);
+    sign.rotation.y = side < 0 ? Math.PI : 0;
+    g.add(sign);
+  }
   if (main) {
     const lights = [];
     const lightGeo = new THREE.SphereGeometry(0.35, 12, 8);
@@ -1724,10 +1727,13 @@ function loop(now) {
   if (state === 'menu' || !track) { renderMenuBG(t); return; }
   if (isDriving() && !player.finished && elapsed > FRAME_GAP_LIMIT) {
     frameStalls++;
-    recordFrame(elapsed);
-    updateFrameHUD();
-    togglePause('stall');
-    return;
+    if (Q !== QUALITY.low && !raceLite && !manualRaceQuality) setRaceLite(true);
+    if (state === 'race') {
+      recordFrame(elapsed);
+      updateFrameHUD();
+      togglePause('stall');
+      return;
+    }
   }
   const wasPaused = state === 'paused';
   const currentFrameInput = readInput();

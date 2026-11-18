@@ -87,9 +87,11 @@ function buildCar(vid, ch, detail = 0, hero = false) {
     return lamp;
   };
 
+  const customGT = vid === 'gt' && simulationMode();
   const sections = BODY_SECTIONS[vid];
-  shell(sections, paint, 0, vid === 'muscle' ? .48 : .70);
-  if (CANOPY_SECTIONS[vid]) {
+  if (customGT) buildGTBody({ mesh, box, rod, paint, accent, carbon, glazing, alloy, white, red, detail });
+  else shell(sections, paint, 0, vid === 'muscle' ? .48 : .70);
+  if (!customGT && CANOPY_SECTIONS[vid]) {
     const glass = CANOPY_SECTIONS[vid];
     shell(glass, glazing, 0, vid === 'lmp' ? .84 : .46);
     shell(glass.slice(1,-1).map(([z,w,base,crown]) => [z,w * .68,crown - .05,crown + .018]), paint);
@@ -145,7 +147,7 @@ function buildCar(vid, ch, detail = 0, hero = false) {
     rod([-.60,1.9,.27],[.60,1.9,.27],.065,accent);
     rod([-.62,1.87,-.85],[.62,1.87,-.85],.065,alloy);
     box(0,.45,1.94,1.56,.13,.22,carbon);
-  } else {
+  } else if (!customGT) {
     box(0,.286,zMax-.11,1.91,.078,.38,carbon);
     box(0,.47,zMax-.24,.86,.17,.32,carbon);
     box(0,.30,zMin+.16,1.83,.098,.42,carbon);
@@ -179,7 +181,7 @@ function buildCar(vid, ch, detail = 0, hero = false) {
     }
   }
 
-  if (detail >= 1) {
+  if (detail >= 1 && !customGT) {
     const layers = vid === 'f1' ? [0] : [-.15,.15];
     for (const center of layers) {
       const positions = [], indices = [];
@@ -218,9 +220,14 @@ function buildCar(vid, ch, detail = 0, hero = false) {
       mesh(new THREE.TorusGeometry(r*.606,.024,5,segments),alloy,face,0,0,spin).rotation.y = Math.PI/2;
       const slots = detail ? 7 : 4;
       for (let i=0;i<slots;i++) {
-        const spoke = mesh(new THREE.BoxGeometry(.033,r*.40,.045),alloy,face+side*.018,0,0,spin);
+        const spoke = mesh(new THREE.BoxGeometry(.033,r*.40,customGT ? .026 : .045),alloy,face+side*.018,0,0,spin);
         const angle = i/slots * Math.PI * 2;
         spoke.position.y = Math.cos(angle)*r*.37; spoke.position.z = Math.sin(angle)*r*.37; spoke.rotation.x = angle;
+        if (customGT && detail) {
+          const split = mesh(spoke.geometry,alloy,face+side*.018,0,0,spin);
+          split.position.y = Math.cos(angle+.12)*r*.37; split.position.z = Math.sin(angle+.12)*r*.37;
+          split.rotation.x = angle+.28;
+        }
       }
       if (detail >= 2) {
         const caliper = mesh(new THREE.BoxGeometry(.065,r*.27,r*.25),red,face-side*.013,r*.15,-r*.34,steer);

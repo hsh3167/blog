@@ -131,33 +131,52 @@ const autoQ = !QUALITY[savedQ];
 let Q = QUALITY[settings.q];
 let prScale = 1, fpsFrames = 0, fpsTime = 0;
 let camHeading = 0, lookBack = false, lastCount = null, stateBefore = 'race';
-let physicsLag = 0, hudLag = 0, minimapLag = 0, jumpQueued = false, itemQueued = false;
+let physicsLag = 0, hudLag = 0, minimapLag = 0;
+let jumpQueued = false, itemQueued = false, itemBackQueued = false;
+let raceLite = false, manualRaceQuality = false, lowFpsWindows = 0;
+const FRAME_GAP_LIMIT = 0.25;
+const frameSamples = [];
+let frameWriteIndex = 0, frameStalls = 0;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ================= 입력 =================
 const keys = {};
-const prev = { hop: false, item: false };
+const KEY_HOP = ['Space', 'ShiftLeft', 'ShiftRight'];
+const KEY_ITEM = ['KeyE', 'KeyQ', 'KeyF'];
+const KEY_BRAKE = ['ArrowDown', 'KeyS', 'KeyZ'];
+const isHeld = group => group.some(key => keys[key]);
+const isDriving = () => state === 'race' || state === 'countdown';
+
 addEventListener('keydown', e => {
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
-  keys[e.code] = true;
+  const code = e.code;
+  if (state !== 'menu' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(code)
+    && !e.target.closest?.('button')) e.preventDefault();
+  if (isDriving() && !e.repeat && !e.target.closest?.('button')) {
+    if (KEY_HOP.includes(code) && !isHeld(KEY_HOP)) jumpQueued = true;
+    if (KEY_ITEM.includes(code) && !isHeld(KEY_ITEM) && !itemQueued) {
+      itemQueued = true;
+      itemBackQueued = isHeld(KEY_BRAKE);
+    }
+  }
+  keys[code] = true;
   firstInteract();
   if (e.repeat) return;
-  if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
-  if (e.code === 'KeyM') Sound.toggle();
-  if (e.code === 'KeyB') Music.toggle();
-  if (e.code === 'Enter' && state === 'menu' && !e.target.closest?.('button')) startRace();
+  if (code === 'Escape' || code === 'KeyP') togglePause();
+  if (code === 'KeyM') Sound.toggle();
+  if (code === 'KeyB') Music.toggle();
+  if (code === 'Enter' && state === 'menu' && !e.target.closest?.('button')) startRace();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
+function clearQueuedInput() {
+  jumpQueued = itemQueued = itemBackQueued = false;
+}
 function clearInput() {
   for (const key in keys) keys[key] = false;
-  jumpQueued = itemQueued = false;
+  clearQueuedInput();
 }
 addEventListener('blur', clearInput);
 addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    clearInput();
-    if (state === 'race' || state === 'countdown') togglePause();
-  }
+  if (document.hidden && isDriving()) togglePause('hidden');
   lastT = performance.now();
   physicsLag = 0;
 });
@@ -169,17 +188,15 @@ function firstInteract() {
   if (Sound.ctx && Sound.ctx.state === 'suspended') Sound.ctx.resume();
   if (state === 'menu') Music.play('menu');
 }
-let padPausePrev = false;
+let padPausePrev = false, padHopPrev = false, padItemPrev = false;
 function readInput() {
   const k = keys;
   let steer = (k.ArrowRight || k.KeyD ? 1 : 0) - (k.ArrowLeft || k.KeyA ? 1 : 0);
   let accel = !!(k.ArrowUp || k.KeyW || k.KeyX);
-  let brake = !!(k.ArrowDown || k.KeyS || k.KeyZ);
-  let hop = !!(k.Space || k.ShiftLeft || k.ShiftRight);
-  let item = !!(k.KeyE || k.KeyQ || k.KeyF);
+  let brake = isHeld(KEY_BRAKE), hop = isHeld(KEY_HOP);
   let back = !!(k.KeyC);
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  let padPaused = false;
+  let padPaused = false, padHop = false, padItem = false;
   for (const gp of pads) {
     if (!gp) continue;
     const b = i => gp.buttons[i] && gp.buttons[i].pressed;
@@ -188,16 +205,17 @@ function readInput() {
     if (b(14)) steer = -1; if (b(15)) steer = 1;
     accel = accel || b(0) || b(7);
     brake = brake || b(1) || b(6) || (gp.axes[1] > 0.6);
-    hop = hop || b(5);
-    item = item || b(4) || b(3);
+    padHop = Boolean(b(5));
+    padItem = Boolean(b(4) || b(3));
+    hop ||= padHop;
     back = back || b(2);
     padPaused = Boolean(b(9));
     break;
   }
   if (padPaused && !padPausePrev) togglePause();
   padPausePrev = padPaused;
-  const inp = { steer: clamp(steer, -1, 1), accel, brake, hop, back, hopPressed: hop && !prev.hop, itemPressed: item && !prev.item };
-  prev.hop = hop; prev.item = item;
+  const inp = { steer: clamp(steer, -1, 1), accel, brake, hop, back, hopPressed: padHop && !padHopPrev, itemPressed: padItem && !padItemPrev };
+  padHopPrev = padHop; padItemPrev = padItem;
   return inp;
 }
 
@@ -537,6 +555,7 @@ function makeSky(th) {
 function buildWorld(tr) {
   const def = tr.def, th = THEMES[def.theme]; theme = th;
   scene = new THREE.Scene();
+  scene.userData.optionalScenery = [];
   scene.fog = new THREE.Fog(th.fog, th.fogNear * Q.fog, th.fogFar * Q.fog);
   anims = [];
   camera.far = th.fogFar * Q.fog + 200; camera.updateProjectionMatrix();
@@ -654,14 +673,16 @@ function buildWorld(tr) {
       m.userData.dyn = true; boxes.push({ mesh: m, idx, lat, x: m.position.x, z: m.position.z, y0: m.position.y, active: true, t: 0, ph: k * 0.7 });
     }
   }
+  const decorationStart = scene.children.length;
   decorate(tr, th, def.theme);
+  scene.userData.optionalScenery.push(...scene.children.slice(decorationStart));
   scene.traverse(o => { if (o !== sun && o !== sun.target && !o.userData.dyn) { o.updateMatrix(); o.matrixAutoUpdate = false; } });
   // 하늘 장식
   if (!th.night) {
     const cm = new THREE.SpriteMaterial({ map: TEX.cloud, fog: false, transparent: true, opacity: 0.9, depthWrite: false, color: def.theme === 'desert' ? 0xffe0c0 : 0xffffff });
     for (let i = 0; i < Q.clouds; i++) {
       const s = new THREE.Sprite(cm); const a = rand(0, TAU), r = rand(300, Math.min(2200, camera.far * 0.75));
-      s.position.set(b.cx + Math.cos(a) * r, rand(250, 520), b.cz + Math.sin(a) * r); const w = rand(250, 600); s.scale.set(w, w * 0.45, 1); scene.add(s);
+      s.position.set(b.cx + Math.cos(a) * r, rand(250, 520), b.cz + Math.sin(a) * r); const w = rand(250, 600); s.scale.set(w, w * 0.45, 1); scene.add(s); scene.userData.optionalScenery.push(s);
     }
   } else {
     const sg = new THREE.BufferGeometry(), sp = [];
@@ -674,15 +695,31 @@ function buildWorld(tr) {
 }
 function addGantry(tr, idx, tex, main) {
   const g = new THREE.Group();
-  const pm = std(0xd0d0d0, { metalness: 0.7, roughness: 0.35 });
-  const w = tr.wallD + 1.5;
-  for (const s of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(1, 11, 1), pm); p.position.set(s * w, 5.5, 0); p.castShadow = true; g.add(p); }
-  const bm = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: theme.night ? 0.6 : 0.12 });
-  const ban = new THREE.Mesh(new THREE.BoxGeometry(w * 2 + 1, 2.6, 0.6), [pm, pm, pm, pm, bm, bm]); ban.position.y = 10; ban.castShadow = true; g.add(ban);
+  const postMaterial = std(0xa7b4c6, { metalness: 0.55, roughness: 0.45 });
+  const edge = tr.wallD + 1.5;
+  const height = main ? 13.8 : 12.4;
+  const postGeo = new THREE.BoxGeometry(0.55, height, 0.55);
+  for (const side of [-1, 1]) {
+    const post = new THREE.Mesh(postGeo, postMaterial);
+    post.position.set(side * edge, height / 2, 0);
+    g.add(post);
+  }
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(edge * 2 + 0.6, 0.38, 0.38), postMaterial);
+  beam.position.y = height;
+  g.add(beam);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(main ? 8.6 : 10, 1.35), new THREE.MeshBasicMaterial({
+    map: tex, side: THREE.DoubleSide,
+  }));
+  sign.position.set(-tr.halfW * 0.85, height + 0.75, 0);
+  g.add(sign);
   if (main) {
     const lights = [];
-    for (let k = 0; k < 5; k++) { const l = new THREE.Mesh(new THREE.SphereGeometry(0.45, 12, 8), new THREE.MeshBasicMaterial({ color: 0x330000 })); l.position.set(-4 + k * 2, 8.2, -0.4); g.add(l); lights.push(l); }
-    const lb = new THREE.Mesh(new THREE.BoxGeometry(11, 1.4, 0.4), std(0x111111)); lb.position.set(0, 8.2, -0.1); g.add(lb);
+    const lightGeo = new THREE.SphereGeometry(0.35, 12, 8);
+    for (let i = 0; i < 5; i++) {
+      const light = new THREE.Mesh(lightGeo, new THREE.MeshBasicMaterial({ color: 0x330000 }));
+      light.position.set((i - 2) * 0.89, height - 0.5, 0);
+      g.add(light); lights.push(light);
+    }
     scene.userData.startLights = lights;
   }
   placeOnTrack(g, tr, idx, 0, 0); scene.add(g);
@@ -712,16 +749,44 @@ function addGrandstand(tr, idx, side) {
   if (nearest(tr, tp.x, tp.z, 1).d < tr.wallD + 3) return;
   scene.add(g);
 }
+function pitLocation(tr) {
+  // Check the entire footprint against every nearby piece of the course.
+  for (const meters of [80, 110, 145, 180, 220]) {
+    const idx = Math.round(meters / tr.sp) % tr.N;
+    const { P, R, T, wallD } = tr;
+    for (const offset of [18, 25]) {
+      for (const side of [-1, 1]) {
+        const lat = side * (wallD + offset);
+        const x = P[idx].x + R[idx].x * lat, z = P[idx].z + R[idx].z * lat;
+        let clearance = Infinity;
+        for (let length = -30; length <= 30; length += 5) {
+          for (const width of [-6, 0, 6]) {
+            const dx = x + T[idx].x * length + R[idx].x * width;
+            const dz = z + T[idx].z * length + R[idx].z * width;
+            clearance = Math.min(clearance, nearest(tr, dx, dz, 2).d);
+          }
+        }
+        if (clearance >= wallD + 3) return { idx, lat, clearance };
+      }
+    }
+  }
+  return null;
+}
 function addPits(tr) {
+  const location = pitLocation(tr);
+  if (!location) return;
   const g = new THREE.Group();
-  const win = std(0xffffff, { map: cloneTex(TEX.windows, 4, 1) });
-  const bw = new THREE.Mesh(new THREE.BoxGeometry(110, 9, 14), [std(0xeeeeee), std(0xeeeeee), std(0x9e9e9e), std(0x9e9e9e), win, win]);
-  bw.position.y = 4.5; bw.castShadow = bw.receiveShadow = true; g.add(bw);
-  const top = new THREE.Mesh(new THREE.BoxGeometry(40, 5, 12), std(0x263238, { metalness: 0.5, roughness: 0.2 })); top.position.set(20, 11.5, 0); top.castShadow = true; g.add(top);
-  const idx = Math.floor(tr.N * 0.985);
-  placeOnTrack(g, tr, idx, -(tr.wallD + 12), -0.3);
-  g.rotation.y = tr.H[idx];
+  const structure = std(0xf0f2f4), windows = std(0xd7e1eb, { map: cloneTex(TEX.windows, 4, 1) });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(12, 4.4, 58), [windows, windows, structure, structure, structure, structure]);
+  body.position.y = 2.2;
+  body.receiveShadow = true;
+  g.add(body);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(12, 0.55, 60), std(0x263238));
+  roof.position.y = 4.65;
+  g.add(roof);
+  placeOnTrack(g, tr, location.idx, location.lat, -0.3);
   scene.add(g);
+  scene.userData.optionalScenery.push(g);
 }
 function scatter(tr, count, minD, fn, maxR = 700) {
   const b = tr.bounds; let placed = 0, tries = 0;
@@ -980,7 +1045,7 @@ function buildCar(vid, ch) {
   const shadowBlob = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 5.2), new THREE.MeshBasicMaterial({ map: TEX.blob, transparent: true, depthWrite: false, opacity: 0.6 }));
   shadowBlob.rotation.x = -Math.PI / 2; shadowBlob.position.y = 0.06; shadowBlob.visible = !(Q.shadow > 0); g.add(shadowBlob);
   g.traverse(o => { if (o.isMesh && !o.material.transparent) o.castShadow = Q.shadow > 0; });
-  return { group: g, body, wheels, sparks, flame, paint: M.paint, baseColor: new THREE.Color(ch.color) };
+  return { group: g, body, wheels, sparks, flame, shadowBlob, paint: M.paint, baseColor: new THREE.Color(ch.color) };
 }
 function matKey(m) { return [m.type, m.color.getHex(), m.emissive ? m.emissive.getHex() : 0, m.emissiveIntensity || 0, m.metalness || 0, m.roughness || 0, m.transparent, m.opacity].join('|'); }
 function mergeMeshes(root, meshes, parent, preserveMaterial) {
@@ -1132,7 +1197,10 @@ function project(o, isKart) {
   if (o.courseProgress < o.nextGate) return;
   const quarter = Math.round(o.nextGate * 4 / N);
   o.nextGate = Math.round((quarter + 1) * N / 4);
-  if (quarter % 4 !== 0) return;
+  if (quarter % 4 !== 0) {
+    if (o.isPlayer && settings.mode === TRIAL) recordTrialSector(o, quarter % 4);
+    return;
+  }
   o.lap++;
   onLap(o);
 }
@@ -1152,15 +1220,17 @@ function ranking() {
 }
 function onLap(k) {
   const lapTime = raceTime - k.lapStart;
-  k.lapStart = raceTime;
+  if (k.lap > LAPS) { k.finished = true; k.finishTime = raceTime; }
+  const trial = k.isPlayer && settings.mode === TRIAL;
   if (k.lap >= 2) {
     k.lapTimes.push(lapTime);
-    if (k.bestLap === null || lapTime < k.bestLap) k.bestLap = lapTime;
+    if (trial) finishTrialLap(k, lapTime);
+    else if (k.bestLap === null || lapTime < k.bestLap) k.bestLap = lapTime;
   }
-  if (k.lap > LAPS) { k.finished = true; k.finishTime = raceTime; }
+  k.lapStart = raceTime;
   if (!k.isPlayer) return;
-  saveTrialRecord(k);
   if (k.finished) { playerFinished(); return; }
+  if (trial) beginTrialLap(k);
   if (k.lap === LAPS) {
     banner('🔔 마지막 랩!', 1800);
     Sound.beep(880, 0.15); setTimeout(() => Sound.beep(1100, 0.25), 160);
@@ -1299,9 +1369,9 @@ function useItem(k, inp) {
   else if (it === 'star') { k.star = 7.5; if (k.isPlayer) { Sound.beep(988, 0.12); setTimeout(() => Sound.beep(1319, 0.2), 120); } }
   else if (it === 'banana') { spawnProj('banana', k, k.pos.x - fx * 4.2, k.pos.z - fz * 4.2, 0, 0); if (k.isPlayer) Sound.beep(300, 0.1, 'triangle', 0.07); }
   else {
-    const back = inp.brake, dir = back ? -1 : 1;
+    const back = inp.itemBack ?? inp.brake, dir = back ? -1 : 1;
     const p = spawnProj(it, k, k.pos.x + fx * 4 * dir, k.pos.z + fz * 4 * dir, back ? k.heading + Math.PI : k.heading, (it === 'red' ? 95 : 105) + Math.max(0, k.speed * dir) * 0.6);
-    if (back) p.target = null;
+    if (back) { p.target = null; p.rearShot = true; }
     if (k.isPlayer) Sound.beep(it === 'red' ? 700 : 500, 0.15, 'square', 0.07, -200);
   }
   if (--k.itemCount <= 0) { k.item = null; k.itemCount = 0; }
@@ -1321,7 +1391,7 @@ function updateProjectiles(dt) {
     p.age += dt; p.life -= dt;
     if (p.life <= 0) { removeProj(p); continue; }
     if (p.type !== 'banana') {
-      if (p.type === 'red') {
+      if (p.type === 'red' && !p.rearShot) {
         let tx, tz, direct = false; const tg = p.target;
         if (tg && !tg.finished) { const d = Math.hypot(tg.pos.x - p.pos.x, tg.pos.z - p.pos.z), ahead = (tg.idx - p.idx + N) % N; if (d < 40 || (ahead < 20 && d < 60)) { tx = tg.pos.x; tz = tg.pos.z; direct = true; } }
         if (!direct) { const ti = (p.idx + 14) % N; tx = P[ti].x + R[ti].x * p.lat * 0.5; tz = P[ti].z + R[ti].z * p.lat * 0.5; }
@@ -1333,7 +1403,7 @@ function updateProjectiles(dt) {
       if (Math.abs(p.lat) > limit) {
         const s = Math.sign(p.lat), r = R[p.idx], over = Math.abs(p.lat) - limit;
         p.pos.x -= r.x * over * s; p.pos.z -= r.z * over * s; p.lat = s * limit;
-        if (p.type === 'green') { let dx = Math.sin(p.ang), dz = Math.cos(p.ang); const dot = dx * r.x + dz * r.z; dx -= 2 * dot * r.x; dz -= 2 * dot * r.z; p.ang = Math.atan2(dx, dz); if (++p.bounces > 7) { removeProj(p); continue; } }
+        if (p.type === 'green' || p.rearShot) { let dx = Math.sin(p.ang), dz = Math.cos(p.ang); const dot = dx * r.x + dz * r.z; dx -= 2 * dot * r.x; dz -= 2 * dot * r.z; p.ang = Math.atan2(dx, dz); if (++p.bounces > 7) { removeProj(p); continue; } }
       }
       p.mesh.rotation.y += dt * 12;
     }
@@ -1399,10 +1469,13 @@ function startRace() {
   setTimeout(() => { try { buildRace(); } catch (error) { showGameError(error); toMenu(); } }, 40);
 }
 function buildRace() {
+  raceLite = manualRaceQuality = false;
+  resetFrameStats();
+  frameStalls = 0;
   applyQuality();
   if (Sound.ctx) Music.render(TRACKS[settings.track].music);
   physicsLag = hudLag = minimapLag = 0;
-  jumpQueued = itemQueued = false;
+  clearQueuedInput();
   lookBack = false;
   disposeScene(scene);
   envRT?.dispose();
@@ -1435,14 +1508,18 @@ function buildRace() {
     k.skill = (CC[settings.cc].ai + (TRACKS[settings.track].hard || 0)) * k.driver.pace;
     k.aiLane = k.aiLaneTarget = lat;
     k.aiThinkT = trial ? 0 : -i * 0.012;
-    if (isP) { player = k; k.previousRecord = readTrialRecord(); }
+    if (isP) {
+      player = k;
+      if (trial) initTimeTrial(k);
+    }
     snapshotKart(k);
     karts.push(k);
     updateVisuals(k, 0, 0);
   });
   camHeading = player.heading;
   camera.fov = 66; camera.updateProjectionMatrix();
-  camera.position.set(player.pos.x - Math.sin(camHeading) * 40, player.gy + 18, player.pos.z - Math.cos(camHeading) * 40);
+  camera.position.set(player.pos.x - Math.sin(camHeading) * 14.5, player.gy + 6.7, player.pos.z - Math.cos(camHeading) * 14.5);
+  camera.lookAt(player.pos.x + Math.sin(camHeading) * 8, player.gy + 1.5, player.pos.z + Math.cos(camHeading) * 8);
   chasePosition.copy(camera.position);
   wasLookingBack = false;
   skidTime = 0;
@@ -1450,8 +1527,10 @@ function buildRace() {
   Music.stop();
   drawMinimapBase();
   renderer.compile(scene, camera);
+  renderScene(0, performance.now() / 1000);
   $('loading').classList.add('hidden'); $('hud').classList.remove('hidden');
   updateHUD(0);
+  updateFrameHUD();
   drawMinimap();
   lastT = performance.now();
 }
@@ -1492,26 +1571,58 @@ function showResults() {
   $('results').classList.remove('hidden');
 }
 function showTrialResults() {
-  const previous = player.previousRecord;
-  $('resTitle').textContent = player.newTotalRecord ? '🏆 타임어택 신기록!' : '타임어택 완주';
-  const rows = player.lapTimes.map((time, i) => '<tr><td>' + (i + 1) + '</td><td>' + fmt(time) + '</td><td>' + (recordDelta(time, previous.lap).trim() || '—') + '</td></tr>');
-  $('resTable').innerHTML = '<tr><th>랩</th><th>기록</th><th>이전 최고 랩 대비</th></tr>' + rows.join('');
-  $('resBest').textContent = '완주 ' + fmt(player.finishTime) + recordDelta(player.finishTime, previous.total)
-    + '\n최고 랩 ' + fmt(player.bestLap) + (player.newLapRecord ? ' · 신기록' : '');
-  $('resNote').textContent = player.recordUnavailable ? '브라우저 저장소를 사용할 수 없어 이번 기록은 저장되지 않았습니다.' : '';
+  const previous = player.trialBaseline;
+  const result = player.newOverallTotal || player.newOverallLap ? '🏆 종합 신기록!'
+    : player.newMachineTotal || player.newMachineLap ? '🏆 머신 신기록!' : '타임어택 완주';
+  $('resTitle').textContent = result;
+  const rows = player.lapTimes.map((time, i) => {
+    const valid = player.trialLapValidity[i];
+    return '<tr><td>' + (i + 1) + '</td><td>' + fmt(time) + '</td><td>'
+      + (valid ? recordDelta(time, previous.lap).trim() || '—' : '기록 제외') + '</td></tr>';
+  });
+  $('resTable').innerHTML = '<tr><th>랩</th><th>기록</th><th>머신 최고 랩 대비</th></tr>' + rows.join('');
+  $('resBest').textContent = '완주 ' + fmt(player.finishTime)
+    + (player.trialRunValid ? recordDelta(player.finishTime, previous.total) : ' · 기록 제외')
+    + '\n유효 최고 랩 ' + (player.bestLap === null ? '—' : fmt(player.bestLap));
+  const notes = [];
+  if (!player.trialRunValid) notes.push('프레임 지연 또는 탭 이동이 포함된 완주 기록과 해당 랩을 제외했습니다.');
+  if (player.recordUnavailable) notes.push('브라우저 저장소에 새 기록을 저장하지 못했습니다.');
+  else if (player.ghostUnavailable) notes.push('새 기록은 저장했습니다. 고스트 데이터 저장 공간이 부족합니다.');
+  $('resNote').textContent = notes.join(' ');
   $('results').classList.remove('hidden');
 }
 function toMenu() {
   state = 'menu';
+  raceLite = false;
+  resetFrameStats();
+  prScale = 1;
+  applyQuality();
   updateModeUI();
   $('speedLines').style.opacity = 0; ['results', 'pause', 'hud'].forEach(id => $(id).classList.add('hidden')); $('menu').classList.remove('hidden');
   Sound.engine(0, false); Music.play('menu');
 }
-function togglePause() {
+function togglePause(reason = 'manual') {
+  if (!isDriving() && state !== 'paused') return;
   physicsLag = 0;
-  jumpQueued = itemQueued = false;
-  if (state === 'race' || state === 'countdown') { stateBefore = state; state = 'paused'; $('pause').classList.remove('hidden'); Sound.engine(0, false); }
-  else if (state === 'paused') { state = stateBefore; $('pause').classList.add('hidden'); }
+  lastT = performance.now();
+  clearInput();
+  if (isDriving()) {
+    if (state === 'race' && reason !== 'manual') invalidateTimeTrial(player);
+    stateBefore = state; state = 'paused';
+    $('pauseReason').textContent = reason === 'stall' ? '프레임 지연으로 주행을 멈췄습니다.'
+      : reason === 'hidden' ? '게임 화면을 떠나 주행을 멈췄습니다.' : '';
+    if (stateBefore === 'race' && settings.mode === TRIAL && !player.trialRunValid) {
+      $('pauseReason').textContent += ' 이번 완주와 중단된 랩은 최고 기록에서 제외됩니다.';
+    }
+    updateRaceQualityLabel();
+    $('pause').classList.remove('hidden');
+    $('resumeBtn').focus();
+    Sound.engine(0, false);
+  } else {
+    state = stateBefore; $('pause').classList.add('hidden');
+    $('resumeBtn').blur();
+    fpsFrames = 0; fpsTime = 0;
+  }
 }
 
 // ================= HUD =================
@@ -1538,9 +1649,13 @@ function updateHUD(dt) {
   const lapTime = player.finished ? player.lapTimes.at(-1) : Math.max(0, raceTime - player.lapStart);
   setT('lapClock', player.lap > 0 && !player.finished ? '현재 랩 ' + fmt(lapTime) : '');
   const lastLap = player.lapTimes.at(-1);
-  const benchmark = settings.mode === TRIAL ? player.previousRecord.lap : null;
-  const comparison = lastLap === undefined ? '' : '직전 랩 ' + fmt(lastLap) + recordDelta(lastLap, benchmark);
-  setT('lapCompare', comparison || (benchmark === null ? '' : '최고 랩 ' + fmt(benchmark)));
+  const trial = settings.mode === TRIAL;
+  const benchmark = trial ? player.trialBaseline.lap : null;
+  const lastLapValid = !trial || player.trialLapValidity.at(-1);
+  const comparison = lastLap === undefined ? '' : '직전 랩 ' + fmt(lastLap)
+    + (lastLapValid ? recordDelta(lastLap, benchmark) : ' · 기록 제외');
+  setT('lapCompare', comparison || (benchmark === null ? '' : '머신 최고 랩 ' + fmt(benchmark)));
+  setT('sectorCompare', trial ? trialSectorLabel(player) : '');
   setT('speed', Math.round(Math.abs(player.speed) * 4.2));
   if (player.roulette > 0) {
     rouletteFlip -= dt;
@@ -1605,15 +1720,26 @@ function loop(now) {
   const t = now / 1000;
   lastT = now;
   if (document.hidden) return;
-  fpsTick(elapsed);
   if (state === 'loading') return;
   if (state === 'menu' || !track) { renderMenuBG(t); return; }
+  if (isDriving() && !player.finished && elapsed > FRAME_GAP_LIMIT) {
+    frameStalls++;
+    recordFrame(elapsed);
+    updateFrameHUD();
+    togglePause('stall');
+    return;
+  }
+  const wasPaused = state === 'paused';
   const currentFrameInput = readInput();
-  if (state === 'paused') return;
+  if (wasPaused || state === 'paused') return;
+  if (isDriving() && elapsed > 0) fpsTick(elapsed);
 
   jumpQueued ||= currentFrameInput.hopPressed;
-  itemQueued ||= currentFrameInput.itemPressed;
-  physicsLag = Math.min(0.25, physicsLag + dt);
+  if (!itemQueued && currentFrameInput.itemPressed) {
+    itemQueued = true;
+    itemBackQueued = currentFrameInput.brake;
+  }
+  physicsLag += dt;
   while (physicsLag + 1e-9 >= PHYSICS_DT) {
     physicsLag -= PHYSICS_DT;
     for (const k of karts) snapshotKart(k);
@@ -1621,14 +1747,15 @@ function loop(now) {
     else {
       currentFrameInput.hopPressed = jumpQueued;
       currentFrameInput.itemPressed = itemQueued;
-      jumpQueued = itemQueued = false;
+      currentFrameInput.itemBack = itemBackQueued || currentFrameInput.brake;
+      clearQueuedInput();
       step(PHYSICS_DT, t, currentFrameInput);
     }
   }
 
   const alpha = clamp(physicsLag / PHYSICS_DT, 0, 1);
   for (const k of karts) updateVisuals(k, dt, t, alpha);
-  for (const a of anims) a(dt, t);
+  if (!raceLite) for (const a of anims) a(dt, t);
   animateRace(dt, t);
   updateEffects(dt);
   hudLag += dt;
@@ -1672,6 +1799,7 @@ function step(dt, _t, pInp = readInput()) {
     }
     updateKart(k, k.isPlayer && !window.__autopilot ? pInp : aiInput(k, dt), dt);
   }
+  if (settings.mode === TRIAL) sampleTrialLap(player);
   resolveKartContacts();
   updateProjectiles(dt);
   for (const b of boxes) {
@@ -1753,7 +1881,7 @@ function renderScene(dt, t) {
   const fov = 65 + (reducedMotion ? 0 : (boosting ? 10 : 0) + pace * 7);
   const nextFov = lerp(camera.fov, fov, 1 - Math.exp(-5 * dt));
   if (Math.abs(nextFov - camera.fov) > 0.015) { camera.fov = nextFov; camera.updateProjectionMatrix(); }
-  if (!reducedMotion && Q !== QUALITY.low) {
+  if (!reducedMotion && Q !== QUALITY.low && !raceLite) {
     const target = state === 'race' && !lookBack ? (boosting ? 0.48 : 0.16 * smooth(0.7, 1, pace)) : 0;
     speedEffect = lerp(speedEffect, target, 1 - Math.exp(-7 * dt));
     $('speedLines').style.opacity = speedEffect.toFixed(2);
@@ -1761,6 +1889,7 @@ function renderScene(dt, t) {
   skyMesh.position.copy(camera.position);
   sun.target.position.set(position.x + fx * 40, k.gy, position.z + fz * 40);
   sun.position.copy(sun.target.position).addScaledVector(sun.userData.dir, 400);
+  if (settings.mode === TRIAL) drawTrialGhost(k);
   renderer.render(scene, camera);
 }
 
@@ -1831,11 +1960,20 @@ function updateModeUI() {
   $('startBtn').textContent = trial ? '타임어택 시작 (Enter)' : '레이스 시작! (Enter)';
   const record = $('menuRecord');
   record.classList.toggle('hidden', !trial);
+  $('optGhost').classList.toggle('hidden', !trial);
   if (trial) {
-    const best = readTrialRecord();
-    record.textContent = TRACKS[settings.track].name + ' · ' + CC[settings.cc].name
-      + ' | 완주 ' + (best.total === null ? '—' : fmt(best.total))
-      + ' · 최고 랩 ' + (best.lap === null ? '—' : fmt(best.lap));
+    const { overall, machine, legacy } = readTrialRecords();
+    const name = VEHICLES[settings.veh].name;
+    const time = value => value === null ? '—' : fmt(value);
+    const leader = (value, id) => value === null ? '—' : time(value) + ' (' + (VEHICLES.find(v => v.id === id)?.name || '—') + ')';
+    const lines = [
+      '종합 · 완주 ' + leader(overall.total, overall.totalMachine) + ' · 최고 랩 ' + leader(overall.lap, overall.lapMachine),
+      name + ' · 완주 ' + time(machine.total) + ' · 최고 랩 ' + time(machine.lap),
+    ];
+    if (legacy.lap !== null || legacy.total !== null) {
+      lines.push('이전 V3 기록 (머신 미상) · 완주 ' + time(legacy.total) + ' · 랩 ' + time(legacy.lap));
+    }
+    record.textContent = lines.join('\n');
   }
 }
 function updateOptBtns() {
@@ -1843,6 +1981,8 @@ function updateOptBtns() {
   $('optBgm').textContent = `🎵 BGM: ${Music.on ? 'ON' : 'OFF'}`;
   $('optSnd').textContent = `🔊 효과음: ${Sound.on ? 'ON' : 'OFF'}`;
   $('optHq').textContent = `🖥️ 그래픽: ${Q.name}`;
+  $('optGhost').textContent = '고스트 ' + (ghostEnabled ? '켜짐' : '꺼짐');
+  $('optGhost').setAttribute('aria-pressed', String(ghostEnabled));
 }
 const previewCache = {};
 function drawTrackPreview(cv, def) {
@@ -1858,8 +1998,9 @@ function drawTrackPreview(cv, def) {
 }
 function basePR() { return Math.min(devicePixelRatio || 1, Q.pr); }
 function applyQuality() {
-  renderer.setPixelRatio(basePR() * prScale);
-  renderer.shadowMap.enabled = Q.shadow > 0;
+  const ratio = basePR() * prScale;
+  if (renderer.getPixelRatio() !== ratio) renderer.setPixelRatio(ratio);
+  renderer.shadowMap.enabled = Q.shadow > 0 && !raceLite;
   renderer.setSize(innerWidth, innerHeight);
 }
 function createRenderer() {
@@ -1898,16 +2039,65 @@ function setQuality(q) {
   try { localStorage.setItem('super-kart-v3-quality', q); } catch (e) { }
   createRenderer(); updateOptBtns();
 }
+function updateRaceQualityLabel() {
+  $('pauseQuality').textContent = raceLite ? '주행 그래픽: 저사양' : '주행 그래픽: ' + Q.name;
+  $('pauseQuality').setAttribute('aria-pressed', String(raceLite || Q === QUALITY.low));
+  $('pauseQuality').disabled = Q === QUALITY.low;
+}
+function setRaceLite(enabled, manual = false) {
+  if (!scene || Q === QUALITY.low) return;
+  raceLite = enabled;
+  manualRaceQuality ||= manual;
+  lowFpsWindows = 0;
+  for (const scenery of scene.userData.optionalScenery) scenery.visible = !enabled;
+  for (const k of karts) k.m.shadowBlob.visible = enabled;
+  sun.castShadow = !enabled && Q.shadow > 0;
+  prScale = enabled ? Math.min(prScale, 0.65) : Math.min(1, Math.max(prScale, 0.65));
+  $('speedLines').style.opacity = 0;
+  applyQuality();
+  updateRaceQualityLabel();
+  updateFrameHUD();
+  if (state === 'paused') renderScene(0, performance.now() / 1000);
+}
+function resetFrameStats() {
+  fpsFrames = fpsTime = lowFpsWindows = frameWriteIndex = 0;
+  frameSamples.length = 0;
+}
+function recordFrame(dt) {
+  frameSamples[frameWriteIndex] = dt * 1000;
+  frameWriteIndex = (frameWriteIndex + 1) % 240;
+}
+function frameStats() {
+  const sorted = frameSamples.slice().sort((a, b) => a - b);
+  const percentile = p => sorted[Math.ceil(sorted.length * p) - 1] || 0;
+  const total = sorted.reduce((sum, time) => sum + time, 0);
+  return {
+    fps: total ? sorted.length * 1000 / total : 0,
+    p95: percentile(0.95), p99: percentile(0.99), stalls: frameStalls,
+  };
+}
+function updateFrameHUD() {
+  const { fps, p95, p99, stalls } = frameStats();
+  const quality = raceLite ? '저사양' : Q.name;
+  $('fps').textContent = (fps ? Math.round(fps) + ' FPS · ' : '') + quality
+    + (prScale < 1 ? ' · 해상도 ' + Math.round(prScale * 100) + '%' : '');
+  $('frameLatency').textContent = p95 ? 'P95 ' + Math.round(p95) + ' ms · P99 ' + Math.round(p99) + ' ms'
+    + (stalls ? ' · 지연 ' + stalls + '회' : '') : '';
+}
 function fpsTick(dt) {
+  recordFrame(dt);
   fpsFrames++; fpsTime += dt;
-  if (fpsTime < 1) return;
+  if (fpsTime < 1.5) return;
   const fps = fpsFrames / fpsTime; fpsFrames = 0; fpsTime = 0;
-  const el = $('fps'); if (el) el.textContent = Math.round(fps) + ' FPS · ' + Q.name + (prScale < 1 ? ` · 해상도 ${Math.round(prScale * 100)}%` : '') + (softGPU ? ' · ⚠ 하드웨어 가속 꺼짐' : '');
-  if (state !== 'race') return;
-  let ns = prScale;
-  if (fps < 45 && prScale > 0.4) ns = Math.max(0.4, prScale - (fps < 25 ? 0.2 : 0.1));
-  else if (fps > 57 && prScale < 1) ns = Math.min(1, prScale + 0.05);
-  if (ns !== prScale) { prScale = ns; renderer.setPixelRatio(basePR() * prScale); renderer.setSize(innerWidth, innerHeight); }
+  if (state === 'race' && !player.finished) {
+    const maxScale = raceLite ? 0.65 : 1;
+    const next = fps < 42 ? Math.max(0.4, prScale - (fps < 27 ? 0.15 : 0.08))
+      : fps > 57 ? Math.min(maxScale, prScale + 0.04) : prScale;
+    if (next !== prScale) { prScale = next; applyQuality(); }
+    lowFpsWindows = fps < 35 && prScale <= 0.4 ? lowFpsWindows + 1 : 0;
+    if (lowFpsWindows >= 2 && Q !== QUALITY.low && !raceLite && !manualRaceQuality) setRaceLite(true);
+  }
+  updateFrameHUD();
 }
 
 // ================= 초기화 =================
@@ -1928,11 +2118,13 @@ function init() {
   makeTextures();
   buildMenu();
   $('startBtn').onclick = startRace; $('retryBtn').onclick = startRace; $('menuBtn').onclick = toMenu;
-  $('resumeBtn').onclick = togglePause; $('restartBtn').onclick = startRace; $('quitBtn').onclick = toMenu;
+  $('resumeBtn').onclick = () => togglePause(); $('restartBtn').onclick = startRace; $('quitBtn').onclick = toMenu;
+  $('pauseQuality').onclick = () => setRaceLite(!raceLite, true);
+  $('optGhost').onclick = () => { setGhostEnabled(!ghostEnabled); updateOptBtns(); };
   $('optBgm').onclick = () => { firstInteract(); Music.toggle(); };
   $('optSnd').onclick = () => { firstInteract(); Sound.toggle(); };
   $('optHq').onclick = () => { setQuality(Q_ORDER[(Q_ORDER.indexOf(settings.q) + 1) % 3]); };
   requestAnimationFrame(loop);
 }
-window.__game = { get physicsDt() { return PHYSICS_DT; }, get marks() { return effects?.marks.count || 0; }, get state() { return state; }, get player() { return player; }, get karts() { return karts; }, get raceTime() { return raceTime; }, get track() { return track; }, get projectiles() { return projectiles; }, startRace, buildRace, settings, keys, step, ranking, Music, renderScene, setQuality, renderer: () => renderer, scene: () => scene };
+window.__game = { get physicsDt() { return PHYSICS_DT; }, get raceLite() { return raceLite; }, frameStats, get marks() { return effects?.marks.count || 0; }, get state() { return state; }, get player() { return player; }, get karts() { return karts; }, get raceTime() { return raceTime; }, get track() { return track; }, get projectiles() { return projectiles; }, startRace, buildRace, settings, keys, step, ranking, Music, renderScene, setQuality, renderer: () => renderer, scene: () => scene };
 try { init(); } catch (error) { showGameError(error); }

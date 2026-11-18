@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0c1018">
+<title>슈퍼 카트 그랑프리 V4</title>
+<link rel="stylesheet" href="style.css?v=4">
+</head>
+<body>
+<div id="menu">
+  <div class="menu-shell">
+    <header class="masthead">
+      <div class="wordmark"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><h1>슈퍼 카트 <span>그랑프리</span></h1></div>
+      <div class="options" aria-label="게임 설정">
+        <button id="optBgm" class="opt"></button><button id="optSnd" class="opt"></button>
+        <button id="optHq" class="opt"></button><button id="optGhost" class="opt hidden"></button>
+      </div>
+    </header>
+    <main class="dashboard">
+      <section class="console" aria-label="레이스 설정">
+        <div class="console-head">
+          <h2>주행 모드</h2>
+          <div id="driveModes" class="drive-grid" role="group" aria-label="주행 모드"></div>
+          <p id="modeDescription"></p>
+        </div>
+        <div class="setup">
+          <div id="modes" class="race-formats" role="group" aria-label="경기 형식"></div>
+          <div class="setup-tabs" role="group" aria-label="레이스 준비">
+            <button class="tab" data-setup="track" aria-controls="setupTrack">코스</button>
+            <button class="tab" data-setup="vehicle" aria-controls="setupVehicle">차량</button>
+            <button class="tab" data-setup="driver" aria-controls="setupDriver">드라이버</button>
+          </div>
+          <div id="setupTrack"><div id="tracks" class="grid"></div></div>
+          <div id="setupVehicle" class="hidden"><div id="vehs" class="grid"></div></div>
+          <div id="setupDriver" class="hidden"><div id="chars" class="grid"></div></div>
+          <div id="ccSetup"><h3 id="ccTitle">엔진 클래스</h3><div id="ccs" class="grid"></div></div>
+        </div>
+        <div id="menuRecord" class="hidden"></div>
+        <div id="gpuWarn" class="hidden" role="status">소프트웨어 그래픽에서 실행 중입니다. 브라우저에서 하드웨어 가속을 켜면 프레임이 개선될 수 있습니다.</div>
+        <div class="launch">
+          <span id="raceSummary"></span>
+          <button id="startBtn" class="btn"><span id="startLabel">레이스 시작</span><span aria-hidden="true">→</span></button>
+        </div>
+        <details class="controls"><summary>조작 안내</summary><div id="controlsHelp"></div></details>
+        <div id="gpuInfo" class="gpuinfo"></div>
+      </section>
+      <section class="garage" id="garage" aria-label="선택한 차량의 3D 미리보기">
+        <div class="garage-top">
+          <div class="garage-label"><span class="status-dot"></span>차량 미리보기</div>
+          <div class="garage-arrows">
+            <button type="button" id="carPrev" class="opt" aria-label="이전 차량">‹</button>
+            <button type="button" id="carNext" class="opt" aria-label="다음 차량">›</button>
+          </div>
+        </div>
+        <div class="garage-caption">
+          <div id="carPaint" class="paint-chip" aria-hidden="true"></div>
+          <div><p class="garage-label" id="carCategory"></p><h2 id="carName"></h2><p id="carSpecs"></p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="loading" class="hidden" role="status"><div>코스 준비 중</div></div>
+<div id="speedLines" aria-hidden="true"></div>
+<div id="bootError" class="hidden" role="alert"></div>
+<div id="hud" class="hidden">
+  <div id="topL"><div id="lap">LAP 1/3</div><div id="time">0:00.000</div><div id="lapClock"></div><div id="lapCompare"></div><div id="sectorCompare"></div></div>
+  <div id="itemBox"><div id="itemIcon"></div></div>
+  <div id="modeTag"></div>
+  <canvas id="minimap" width="190" height="190" aria-label="코스 미니맵"></canvas>
+  <div id="speedWrap">
+    <div id="simTelemetry" class="hidden">
+      <div class="rpm-shell" role="presentation"><div id="rpmFill"></div></div>
+      <div class="telemetry-line"><span id="gear"></span><span id="rpm"></span></div>
+    </div>
+    <span id="speed">0</span><small>km/h</small>
+  </div>
+  <div id="posWrap"><span id="pos">1</span><span id="posSuf">위</span></div>
+  <div id="center"></div>
+  <div id="banner" role="status"></div>
+  <div id="wrong">역주행</div>
+  <div class="perf"><div id="fps"></div><div id="frameLatency"></div></div>
+  <div id="hint">Esc 일시정지 · C 뒤돌아보기</div>
+</div>
+
+<div id="pause" class="overlay hidden"><div class="panel">
+  <h2>일시정지</h2><p id="pauseReason" role="status"></p>
+  <button id="resumeBtn" class="btn">계속하기</button>
+  <button id="pauseQuality" class="opt" aria-pressed="false">주행 그래픽</button>
+  <div class="row2"><button id="restartBtn" class="btn alt">다시 시작</button><button id="quitBtn" class="btn alt">메뉴로</button></div>
+</div></div>
+
+<div id="results" class="overlay hidden"><div class="panel">
+  <h2 id="resTitle">레이스 결과</h2>
+  <table id="resTable"></table><div id="resBest"></div>
+  <div class="note" id="resNote"></div>
+  <div class="row2"><button id="retryBtn" class="btn">다시 하기</button><button id="menuBtn" class="btn alt">메뉴로</button></div>
+</div></div>
+
+<script defer src="three.min.js"></script>
+<script defer src="simulation-v4.js?v=4"></script>
+<script defer src="race-v3.js?v=4"></script>
+<script defer src="effects-v3.js?v=4"></script>
+<script defer src="trial-v3.js?v=4"></script>
+<script defer src="vehicle-v4.js?v=4"></script>
+<script defer src="game.js?v=4"></script>
+</body>
+</html>
